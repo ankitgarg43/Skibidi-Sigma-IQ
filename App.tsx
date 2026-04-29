@@ -211,6 +211,16 @@ const App: React.FC = () => {
                 <div className="text-8xl font-black text-white mb-2 tracking-tighter drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">
                   {result.iqScore}
                 </div>
+                <div className={`text-3xl font-black uppercase italic tracking-widest mb-6 ${
+                  result.iqScore >= 120 ? 'text-lime-400 drop-shadow-[0_0_10px_rgba(163,230,53,0.8)]' :
+                  result.iqScore >= 100 ? 'text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.8)]' :
+                  result.iqScore >= 80 ? 'text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.8)]' :
+                  'text-red-500 drop-shadow-[0_0_10px_rgba(239,68,68,0.8)]'
+                }`}>
+                  {result.iqScore >= 120 ? 'GIGACHAD SIGMA' :
+                   result.iqScore >= 100 ? 'W RIZZ' :
+                   result.iqScore >= 80 ? 'MID RIZZ' : 'L RIZZ (NPC)'}
+                </div>
                 <p className="text-cyan-400 text-sm font-mono mb-8">Top {100 - result.percentile}% Server Rank</p>
                 
                 <div className="w-full grid grid-cols-2 gap-4 border-t-2 border-slate-800 pt-6">

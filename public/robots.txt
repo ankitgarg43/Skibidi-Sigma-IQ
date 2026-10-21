@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ankitgarg43.github.io/Skibidi-Sigma-IQ/sitemap.xml

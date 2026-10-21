@@ -1,180 +1,60 @@
-import { GoogleGenAI, Type, Schema } from "@google/genai";
-import { Question, QuestionCategory, QuizResult, UserAnswer, DifficultyLevel } from "../types";
+import { Question, DifficultyLevel } from '../types';
 
-// Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// OPTIONAL Gemini enhancement for Paste mode.
+// Security fix vs the original repo: no API key is ever baked into the build.
+// The user may paste their own Gemini key in Settings; it is held only in
+// component state for the session (never stored, never sent anywhere except
+// Google's API by the official client), and any failure quietly falls back to
+// the built-in local generator.
 
-const QUESTIONS_COUNT = 10;
-
-// Schema for generating questions
-const questionSchema: Schema = {
-  type: Type.ARRAY,
-  items: {
-    type: Type.OBJECT,
-    properties: {
-      text: { type: Type.STRING, description: "The question text." },
-      options: {
-        type: Type.ARRAY,
-        items: { type: Type.STRING },
-        description: "An array of 4 possible answers."
-      },
-      correctIndex: { type: Type.INTEGER, description: "The index (0-3) of the correct answer." },
-      category: {
-        type: Type.STRING,
-        enum: [
-          QuestionCategory.LOGICAL,
-          QuestionCategory.NUMERICAL,
-          QuestionCategory.VERBAL,
-          QuestionCategory.SPATIAL
-        ]
-      },
-      difficulty: { type: Type.INTEGER, description: "Difficulty level from 1 (Easy) to 5 (Genius)." }
-    },
-    required: ["text", "options", "correctIndex", "category", "difficulty"]
-  }
-};
-
-export const generateQuizQuestions = async (difficulty: DifficultyLevel): Promise<Question[]> => {
+export async function tryGeminiQuestions(
+  apiKey: string,
+  sourceText: string,
+  count: number,
+  difficulty: DifficultyLevel
+): Promise<Question[] | null> {
+  if (!apiKey.trim()) return null;
   try {
-    const model = "gemini-3-flash-preview";
-    
-    let difficultyInstruction = "";
-    switch (difficulty) {
-      case 'easy':
-        difficultyInstruction = "Generate questions with difficulty 1-2 (Easy/Beginner). Focus on simple pattern recognition and basic verbal analogies.";
-        break;
-      case 'medium':
-        difficultyInstruction = "Generate questions with difficulty 3 (Intermediate). Standard IQ test level with balanced logic puzzles.";
-        break;
-      case 'hard':
-        difficultyInstruction = "Generate questions with difficulty 4-5 (Advanced/Genius). Complex, abstract reasoning, multi-step numerical problems, and tricky logic.";
-        break;
-    }
-
-    const prompt = `Generate ${QUESTIONS_COUNT} unique, challenging, and high-quality IQ test questions. 
-    Mix the categories: Logical Reasoning, Numerical Intelligence, Verbal Intelligence, and Spatial Reasoning.
-    ${difficultyInstruction}
-    Ensure there is strictly only one correct answer per question.
-    Keep the tone professional for the questions themselves, but make them tricky.`;
-
+    const { GoogleGenAI, Type } = await import('@google/genai');
+    const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
+    const trimmed = sourceText.slice(0, 12000);
+    const prompt = `Create exactly ${count} multiple-choice questions (4 options each, exactly one correct) ONLY from the facts in the text below. Difficulty: ${difficulty}. Vary the topics covered. For each question give a one-sentence explanation that quotes or paraphrases the supporting fact. Label each question's category with the sub-topic it tests.\n\nTEXT:\n${trimmed}`;
     const response = await ai.models.generateContent({
-      model,
+      model: 'gemini-3-flash-preview',
       contents: prompt,
       config: {
-        responseMimeType: "application/json",
-        responseSchema: questionSchema,
-        temperature: 0.8
-      }
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              text: { type: Type.STRING },
+              options: { type: Type.ARRAY, items: { type: Type.STRING } },
+              correctIndex: { type: Type.INTEGER },
+              category: { type: Type.STRING },
+              difficulty: { type: Type.INTEGER },
+              explanation: { type: Type.STRING },
+            },
+            required: ['text', 'options', 'correctIndex', 'category', 'difficulty', 'explanation'],
+          },
+        },
+        temperature: 0.7,
+      },
     });
-
-    const rawData = response.text;
-    if (!rawData) throw new Error("No data received from Gemini");
-    
-    const parsedData = JSON.parse(rawData);
-    
-    return parsedData.map((q: any, index: number) => ({
-      ...q,
-      id: index
+    if (!response.text) return null;
+    const parsed = JSON.parse(response.text);
+    if (!Array.isArray(parsed) || parsed.length < 4) return null;
+    return parsed.slice(0, count).map((q: Question, i: number) => ({
+      id: i,
+      text: String(q.text),
+      options: (q.options as string[]).slice(0, 4).map(String),
+      correctIndex: Math.min(3, Math.max(0, Number(q.correctIndex) || 0)),
+      category: String(q.category || 'General'),
+      difficulty: Math.min(5, Math.max(1, Number(q.difficulty) || 3)),
+      explanation: String(q.explanation || ''),
     }));
-
-  } catch (error) {
-    console.error("Error generating questions:", error);
-    throw error;
+  } catch {
+    return null; // local generator takes over
   }
-};
-
-export const analyzeIQ = async (questions: Question[], answers: UserAnswer[], difficulty: DifficultyLevel): Promise<QuizResult> => {
-  // Calculate raw stats locally first
-  let correctCount = 0;
-  const categoryScores: Record<string, { correct: number; total: number }> = {};
-
-  questions.forEach((q) => {
-    if (!categoryScores[q.category]) {
-      categoryScores[q.category] = { correct: 0, total: 0 };
-    }
-    categoryScores[q.category].total += 1;
-
-    const answer = answers.find(a => a.questionId === q.id);
-    if (answer && answer.selectedOptionIndex === q.correctIndex) {
-      correctCount++;
-      categoryScores[q.category].correct += 1;
-    }
-  });
-
-  // Calculate IQ based on difficulty and accuracy
-  const accuracy = correctCount / questions.length;
-  let calculatedIQ = 0;
-
-  switch (difficulty) {
-    case 'easy':
-      // Base 60, Max 120
-      calculatedIQ = Math.round(60 + (accuracy * 60)); 
-      break;
-    case 'medium':
-      // Base 75, Max 145
-      calculatedIQ = Math.round(75 + (accuracy * 70)); 
-      break;
-    case 'hard':
-      // Base 90, Max 165+
-      calculatedIQ = Math.round(90 + (accuracy * 75)); 
-      break;
-  }
-  
-  // Format for Recharts
-  const categoryBreakdown = Object.keys(categoryScores).map(cat => ({
-    category: cat,
-    score: Math.round((categoryScores[cat].correct / categoryScores[cat].total) * 100) || 0,
-    fullMark: 100
-  }));
-
-  // AI Analysis of performance
-  let analysisText = "Could not generate analysis.";
-  try {
-    const model = "gemini-3-flash-preview";
-    const performanceSummary = questions.map(q => {
-      const ans = answers.find(a => a.questionId === q.id);
-      const isCorrect = ans?.selectedOptionIndex === q.correctIndex;
-      return `Category: ${q.category}, Difficulty: ${q.difficulty}, Correct: ${isCorrect}, Time: ${ans?.timeTakenSeconds}s`;
-    }).join('\n');
-
-    const prompt = `You are a Gen Alpha slang expert. Analyze this IQ test performance.
-    Difficulty Level: ${difficulty.toUpperCase()}.
-    The user scored an estimated IQ of ${calculatedIQ}.
-    If the score is high (above 120), call them a "Sigma", "Gigachad", say they have "W Rizz".
-    If the score is average, say they are "Mid" or an "NPC".
-    If the score is low, say they are "Cooked", "Fanum Taxed", or have "L Rizz".
-    Keep it funny, use emojis, but actually refer to their strength in specific categories based on the data. Max 3 sentences.
-    Data:
-    ${performanceSummary}`;
-
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-    });
-    
-    if (response.text) {
-      analysisText = response.text;
-    }
-  } catch (e) {
-    console.error("Analysis generation failed", e);
-    analysisText = "You definitely cooked... something. Try again!";
-  }
-
-  return {
-    iqScore: calculatedIQ,
-    percentile: calculatePercentile(calculatedIQ), 
-    correctCount,
-    totalQuestions: questions.length,
-    categoryBreakdown,
-    analysis: analysisText
-  };
-};
-
-function calculatePercentile(iq: number): number {
-  if (iq < 70) return 2;
-  if (iq < 85) return 16;
-  if (iq < 100) return 50;
-  if (iq < 115) return 84;
-  if (iq < 130) return 98;
-  return 99.9;
 }

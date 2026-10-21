@@ -1,0 +1,10 @@
+{
+  "name": "Skibidi Sigma IQ+ — Test Anything",
+  "short_name": "Sigma IQ+",
+  "description": "Paste any notes and get a quiz with explanations. Timed exams, weak-spot drills, friend duels.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
